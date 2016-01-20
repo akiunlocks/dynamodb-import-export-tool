@@ -16,6 +16,7 @@
         <commons.logging.version>1.2</commons.logging.version>
         <maven.shade.version>2.4.1</maven.shade.version>
         <gpg.skip>true</gpg.skip>
+        <metrics.version>3.1.0</metrics.version>
     </properties>
     <developers>
         <developer>
@@ -28,7 +29,7 @@
             <url>https://www.linkedin.com/in/amcpatrix/en</url>
         </developer>
     </developers>
-    
+
     <contributors>
         <contributor>
             <name>Ben Schwartz</name>
@@ -43,7 +44,7 @@
             <email>dym@amazon.com</email>
         </contributor>
     </contributors>
-    
+
     <inceptionYear>2015</inceptionYear>
 
     <licenses>
@@ -55,6 +56,12 @@
     </licenses>
 
     <dependencies>
+
+        <dependency>
+            <groupId>io.dropwizard.metrics</groupId>
+            <artifactId>metrics-core</artifactId>
+            <version>${metrics.version}</version>
+        </dependency>
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-dynamodb</artifactId>
@@ -110,7 +117,7 @@
                 </configuration>
                 <version>3.0</version>
             </plugin>
-            
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-gpg-plugin</artifactId>

@@ -14,22 +14,20 @@
  */
 package com.amazonaws.dynamodb.bootstrap;
 
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
-
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+import com.amazonaws.auth.*;
+import com.amazonaws.auth.profile.ProfileCredentialsProvider;
 import com.amazonaws.dynamodb.bootstrap.constants.BootstrapConstants;
 import com.amazonaws.dynamodb.bootstrap.exception.NullReadCapacityException;
 import com.amazonaws.dynamodb.bootstrap.exception.SectionOutOfRangeException;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
 import com.amazonaws.services.dynamodbv2.model.TableDescription;
 import com.beust.jcommander.JCommander;
+import org.apache.log4j.*;
+import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
+
+import java.io.IOException;
+import java.util.concurrent.*;
 
 /**
  * The interface that parses the arguments, and begins to transfer data from one
@@ -43,13 +41,31 @@ public class CommandLineInterface {
     private static final Logger LOGGER = LogManager
             .getLogger(CommandLineInterface.class);
 
+
+
     /**
      * Main class to begin transferring data from one DynamoDB table to another
      * DynamoDB table.
-     * 
+     *
      * @param args
      */
     public static void main(String[] args) {
+
+
+//        GenericInit.eyeview();
+
+
+
+        BasicConfigurator.configure(new ConsoleAppender(new PatternLayout("%d{HH:mm:ss.SSS} [%t] %-5p %30.30c - %m%n")));
+        Logger.getRootLogger().setLevel(Level.INFO);
+
+        try {
+            Logger.getRootLogger().addAppender(new DailyRollingFileAppender(new PatternLayout("%d{HH:mm:ss.SSS} [%t] %-5p %30.30c - %m%n"), "/mnt/log/dynamodb-import-export-tool.log", "yyyy-MM-dd"));
+        } catch (IOException e) {
+            LOGGER.warn("failed to add file appender", e);
+        }
+
+
         CommandLineArgs params = new CommandLineArgs();
         JCommander cmd = new JCommander(params);
 
@@ -61,6 +77,7 @@ public class CommandLineInterface {
             cmd.usage();
             return;
         }
+
         final String sourceEndpoint = params.getSourceEndpoint();
         final String destinationEndpoint = params.getDestinationEndpoint();
         final String destinationTable = params.getDestinationTable();
@@ -69,11 +86,28 @@ public class CommandLineInterface {
         final double writeThroughputRatio = params.getWriteThroughputRatio();
         final int maxWriteThreads = params.getMaxWriteThreads();
         final boolean consistentScan = params.getConsistentScan();
+        final int daysToKeep = params.getDaysToKeep();
+        final boolean readOnly = params.getReadOnly();
+
+        LOGGER.info("sourceEndpoint = " + params.getSourceEndpoint());
+        LOGGER.info("destinationEndpoint = " + params.getDestinationEndpoint());
+        LOGGER.info("destinationTable = " + params.getDestinationTable());
+        LOGGER.info("sourceTable = " + params.getSourceTable());
+        LOGGER.info("readThroughputRatio = " + params.getReadThroughputRatio());
+        LOGGER.info("writeThroughputRatio = " + params.getWriteThroughputRatio());
+        LOGGER.info("maxWriteThreads = " + params.getMaxWriteThreads());
+        LOGGER.info("consistentScan = " + params.getConsistentScan());
+        LOGGER.info("daysToKeep = " + params.getDaysToKeep());
+        LOGGER.info("readOnly = " + params.getReadOnly());
+
+
+        final DateTime cutOffDay = new DateTime(DateTimeZone.UTC).withTimeAtStartOfDay().minusDays(daysToKeep);
+        long cutOffDayMillis = cutOffDay.getMillis();
 
         final AmazonDynamoDBClient sourceClient = new AmazonDynamoDBClient(
-                new DefaultAWSCredentialsProviderChain());
+                new EVAWSCredentialsProviderChain());
         final AmazonDynamoDBClient destinationClient = new AmazonDynamoDBClient(
-                new DefaultAWSCredentialsProviderChain());
+                new EVAWSCredentialsProviderChain());
         sourceClient.setEndpoint(sourceEndpoint);
         destinationClient.setEndpoint(destinationEndpoint);
 
@@ -85,6 +119,7 @@ public class CommandLineInterface {
         try {
             numSegments = DynamoDBBootstrapWorker
                     .getNumberOfSegments(readTableDescription);
+            LOGGER.info("Number segments : " + numSegments);
         } catch (NullReadCapacityException e) {
             LOGGER.warn("Number of segments not specified - defaulting to "
                     + numSegments, e);
@@ -92,14 +127,16 @@ public class CommandLineInterface {
 
         final double readThroughput = calculateThroughput(readTableDescription,
                 readThroughputRatio, true);
+        LOGGER.info("readThroughput = " + readThroughput);
         final double writeThroughput = calculateThroughput(
                 writeTableDescription, writeThroughputRatio, false);
+        LOGGER.info("writeThroughput = " + writeThroughput);
 
         try {
             ExecutorService sourceExec = getSourceThreadPool(numSegments);
             ExecutorService destinationExec = getDestinationThreadPool(maxWriteThreads);
             DynamoDBConsumer consumer = new DynamoDBConsumer(destinationClient,
-                    destinationTable, writeThroughput, destinationExec);
+                    destinationTable, writeThroughput, destinationExec, cutOffDayMillis, readOnly);
 
             final DynamoDBBootstrapWorker worker = new DynamoDBBootstrapWorker(
                     sourceClient, readThroughput, sourceTable, sourceExec,
@@ -166,4 +203,13 @@ public class CommandLineInterface {
         return exec;
     }
 
+    static class EVAWSCredentialsProviderChain extends AWSCredentialsProviderChain {
+        public EVAWSCredentialsProviderChain() {
+            super(new EnvironmentVariableCredentialsProvider(),
+                    new PropertiesFileCredentialsProvider("/etc/eyeview/aws.credentials"),
+                    new SystemPropertiesCredentialsProvider(),
+                    new ProfileCredentialsProvider(),
+                    new InstanceProfileCredentialsProvider());
+        }
+    }
 }

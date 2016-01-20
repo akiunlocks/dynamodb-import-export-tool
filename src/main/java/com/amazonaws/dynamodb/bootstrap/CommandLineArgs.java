@@ -109,4 +109,20 @@ public class CommandLineArgs {
     public boolean getConsistentScan() {
         return consistentScan;
     }
+
+    public static final String DAYS_TO_KEEP = "--days_to_keep";
+    @Parameter(names = DAYS_TO_KEEP)
+    private int daysToKeep = 30;
+
+    public int getDaysToKeep() {
+        return daysToKeep;
+    }
+
+    public static final String READ_ONLY = "--readonly";
+    @Parameter(names = READ_ONLY)
+    private boolean readonly = false;
+
+    public boolean getReadOnly() {
+        return readonly;
+    }
 }

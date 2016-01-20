@@ -14,6 +14,12 @@
  */
 package com.amazonaws.dynamodb.bootstrap;
 
+import com.amazonaws.dynamodb.bootstrap.constants.BootstrapConstants;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
+import com.amazonaws.services.dynamodbv2.model.*;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.util.concurrent.RateLimiter;
+
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -22,33 +28,29 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
-import com.amazonaws.dynamodb.bootstrap.constants.BootstrapConstants;
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
-import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-import com.amazonaws.services.dynamodbv2.model.BatchWriteItemRequest;
-import com.amazonaws.services.dynamodbv2.model.PutRequest;
-import com.amazonaws.services.dynamodbv2.model.ReturnConsumedCapacity;
-import com.amazonaws.services.dynamodbv2.model.ScanResult;
-import com.amazonaws.services.dynamodbv2.model.WriteRequest;
-import com.google.common.util.concurrent.RateLimiter;
-
 /**
  * Takes in SegmentedScanResults and launches several DynamoDBConsumerWorker for
  * each batch of items to write to a DynamoDB table.
  */
 public class DynamoDBConsumer extends AbstractLogConsumer {
 
+    private static final String HASH_KEY = "u";
+    private static final String RANGE_KEY = "t";
     private final AmazonDynamoDBClient client;
     private final String tableName;
+    private final long cutOffDayMillis;
     private final RateLimiter rateLimiter;
+    private boolean readOnly;
 
     /**
      * Class to consume logs and write them to a DynamoDB table.
      */
     public DynamoDBConsumer(AmazonDynamoDBClient client, String tableName,
-            double rateLimit, ExecutorService exec) {
+                            double rateLimit, ExecutorService exec, long cutOffDayMillis, boolean readOnly) {
         this.client = client;
         this.tableName = tableName;
+        this.cutOffDayMillis = cutOffDayMillis;
+        this.readOnly = readOnly;
         this.rateLimiter = RateLimiter.create(rateLimit);
         threadPool = exec;
         this.exec = new ExecutorCompletionService<Void>(threadPool);
@@ -69,7 +71,7 @@ public class DynamoDBConsumer extends AbstractLogConsumer {
             try {
                 jobSubmission = exec
                         .submit(new DynamoDBConsumerWorker(batchesIterator
-                                .next(), client, rateLimiter, tableName));
+                                .next(), client, rateLimiter, tableName, readOnly));
             } catch (NullPointerException npe) {
                 throw new NullPointerException(
                         "Thread pool not initialized for LogStashExecutor");
@@ -82,7 +84,7 @@ public class DynamoDBConsumer extends AbstractLogConsumer {
      * Splits up a ScanResult into a list of BatchWriteItemRequests of size 25
      * items or less each.
      */
-    public static List<BatchWriteItemRequest> splitResultIntoBatches(
+    public List<BatchWriteItemRequest> splitResultIntoBatches(
             ScanResult result, String tableName) {
         List<BatchWriteItemRequest> batches = new LinkedList<BatchWriteItemRequest>();
         Iterator<Map<String, AttributeValue>> it = result.getItems().iterator();
@@ -92,8 +94,18 @@ public class DynamoDBConsumer extends AbstractLogConsumer {
         List<WriteRequest> writeRequests = new LinkedList<WriteRequest>();
         int i = 0;
         while (it.hasNext()) {
-            PutRequest put = new PutRequest(it.next());
-            writeRequests.add(new WriteRequest(put));
+
+            Map<String, AttributeValue> item = it.next();
+
+            long ts = Long.parseLong(item.get("t").getN());
+
+            if (ts >= cutOffDayMillis) {
+                continue;
+            }
+            DeleteRequest deleteRequest = new DeleteRequest(ImmutableMap.of(HASH_KEY, new AttributeValue().withS(item.get(HASH_KEY).getS()),
+                            RANGE_KEY, new AttributeValue().withN(item.get(RANGE_KEY).getN())));
+
+            writeRequests.add(new WriteRequest(deleteRequest));
 
             i++;
             if (i == BootstrapConstants.MAX_BATCH_SIZE_WRITE_ITEM) {
