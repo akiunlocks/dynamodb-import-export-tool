@@ -7,7 +7,7 @@
     <name>DynamoDB Import Export Tool</name>
     <url>https://github.com/awslabs/dynamodb-import-export-tool</url>
     <properties>
-        <aws.java.sdk.version>1.10.10</aws.java.sdk.version>
+        <aws.java.sdk.version>1.12.201</aws.java.sdk.version>
         <powermock.version>1.6.2</powermock.version>
         <jcommander.version>1.48</jcommander.version>
         <guava.version>15.0</guava.version>
